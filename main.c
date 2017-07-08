@@ -13,8 +13,9 @@ static mpc_parser_t* Operator;
 static mpc_parser_t* Expr;
 static mpc_parser_t* Lispy;
 
-void lispy_create()
-{
+// General parser functions
+
+void create_parser() {
   // polish notation grammar
   Number   = mpc_new("number");
   Operator = mpc_new("operator");
@@ -32,16 +33,14 @@ void lispy_create()
     Number, Operator, Expr, Lispy);
 }
 
-void lispy_cleanup()
-{
+void cleanup_parser() {
   mpc_cleanup(4, Number, Operator, Expr, Lispy);
 }
 
-void lispy_parse(char* line)
-{
+void parse(char* line, void (*parse_fnc)(mpc_ast_t*)) {
   mpc_result_t r;
   if (mpc_parse("<stdin>", line, Lispy, &r)) {
-    mpc_ast_print(r.output);
+    parse_fnc(r.output);
     mpc_ast_delete(r.output);
   } else {
     mpc_err_print(r.error);
@@ -49,25 +48,79 @@ void lispy_parse(char* line)
   }
 }
 
+typedef void (*visit_node_fnc_t) (mpc_ast_t*, int);
+void traverse_ast(mpc_ast_t* t, visit_node_fnc_t f, int depth) {
+  if (!t || !f) return;
+
+  f(t, depth);
+
+  for (int i = 0; i < t->children_num; ++i)
+    traverse_ast(t->children[i], f, depth + 1);
+}
+
+// Custom printer
+
+void print_ast_node(mpc_ast_t* t, int depth) {
+  for (int i = 0; i < depth; ++i)
+    putchar(' ');
+
+  printf("tag= %s, con=%s, s=(%ld,%ld,%ld), n=%d\n",
+         t->tag,
+         t->contents,
+         t->state.pos, t->state.row, t->state.col,
+         t->children_num);
+}
+
+long sub_eval(mpc_ast_t* t) {
+  if (strstr(t->tag, "number")) {
+    return atoi(t->contents);
+  }
+
+  char* op = t->children[1]->contents;
+  long result = sub_eval(t->children[2]);
+  for (int i = 3; i < t->children_num - 1; ++i) {
+    long value = sub_eval(t->children[i]);
+
+    switch (*op) {
+    case '+': result += value; break;
+    case '-': result -= value; break;
+    case '*': result *= value; break;
+    case '/': result /= value; break;
+    }
+  }
+
+  return result;
+}
+
+void custom_print(mpc_ast_t* t) {
+  traverse_ast(t, &print_ast_node, 0);
+}
+
+
+void custom_eval(mpc_ast_t* t) {
+  printf(">> %ld\n", sub_eval(t));
+}
+
 
 int main(int argc, char** argv) {
-
   puts("build-your-own-lisp Version 0.0.1");
   puts("Press Ctrl-C to Exit\n");
 
-  lispy_create();
+  create_parser();
 
   while (1) {
     char* input = readline("lispy> ");
     add_history(input);
 
-    lispy_parse(input);
-    // printf(">> %s\n", input);
+    /* parse(input, &custom_print); */
+    parse(input, &custom_eval);
+    /* parse(input, &mpc_print); */
+    /* printf("\n===========\n"); */
 
     free(input);
   }
 
-  lispy_cleanup();
+  cleanup_parser();
 
   return 0;
 }
